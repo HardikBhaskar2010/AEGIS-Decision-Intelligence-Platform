@@ -51,8 +51,8 @@ flowchart TB
     Corr --> Flash
     Fore --> Flash
     Narr --> Pro
-    Orch -. streamed events .-> API
-    API -. Socket.IO .-> Graph
+    Orch -.->|streamed events| API
+    API -.->|Socket.IO| Graph
     API --> FS
     GCS --> BQ
     Corr --> Map
