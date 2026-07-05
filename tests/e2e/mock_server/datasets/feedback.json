@@ -1,0 +1,26 @@
+[
+  {
+    "feedback_id": "feedback_1",
+    "sector_id": "sector_7",
+    "ts": "2026-07-05T12:15:00Z",
+    "category": "UTILITIES",
+    "sentiment": "NEGATIVE",
+    "raw_text": "[SYNTHETIC] Power is out since 30 mins! Please fix it."
+  },
+  {
+    "feedback_id": "feedback_2",
+    "sector_id": "sector_7",
+    "ts": "2026-07-05T12:20:00Z",
+    "category": "TRANSIT",
+    "sentiment": "NEGATIVE",
+    "raw_text": "[SYNTHETIC] Metro station is flooded and trains are delayed."
+  },
+  {
+    "feedback_id": "feedback_3",
+    "sector_id": "sector_3",
+    "ts": "2026-07-05T12:45:00Z",
+    "category": "ROADS",
+    "sentiment": "NEUTRAL",
+    "raw_text": "[SYNTHETIC] Minor traffic congestion near industrial layout."
+  }
+]

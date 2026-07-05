@@ -1,0 +1,23 @@
+[
+  {
+    "event_id": "weather_1",
+    "sector_id": "sector_7",
+    "ts": "2026-07-05T12:00:00Z",
+    "event_type": "RAIN",
+    "severity": 0.8
+  },
+  {
+    "event_id": "weather_2",
+    "sector_id": "sector_3",
+    "ts": "2026-07-05T12:30:00Z",
+    "event_type": "WIND",
+    "severity": 0.5
+  },
+  {
+    "event_id": "weather_3",
+    "sector_id": "sector_1",
+    "ts": "2026-07-05T14:00:00Z",
+    "event_type": "CLEAR",
+    "severity": 0.0
+  }
+]

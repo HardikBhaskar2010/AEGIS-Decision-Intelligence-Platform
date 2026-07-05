@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+venv/
+env/
+.venv/
+
+# Node
+node_modules/
+dist/
+
+# Database
+mock_db.sqlite
+*.db
+
+# AI Agents
+.agents/
+skills-lock.json
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,23 @@
+[
+  {
+    "sector_id": "sector_7",
+    "name": "Sector 7 - Downtown Core",
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "population": 85000
+  },
+  {
+    "sector_id": "sector_3",
+    "name": "Sector 3 - Industrial Zone",
+    "lat": 12.9250,
+    "lng": 77.5897,
+    "population": 42000
+  },
+  {
+    "sector_id": "sector_1",
+    "name": "Sector 1 - Residential East",
+    "lat": 12.9562,
+    "lng": 77.7011,
+    "population": 120000
+  }
+]
