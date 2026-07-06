@@ -4,6 +4,9 @@
 >
 > AEGIS turns scattered city/community data into a natural-language decision copilot. By asking simple questions, it correlates transit, weather, utilities, health, and citizen-feedback data live in BigQuery, delivering an explainable "Situation Brief" complete with risk scores, action recommendations, and a live what-if simulator.
 
+> [!WARNING]
+> **This repository currently contains a Prototype utilizing mock data.** For a full live working deployment, one needs to connect actual Google Cloud Platform (GCP) data (BigQuery/Firestore) and provide valid GCP credentials.
+
 ---
 
 ## 👥 Hackathon & Team Metadata
