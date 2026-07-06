@@ -63,7 +63,7 @@ async def test_scenario_2_risk_escalation(client, auth_headers):
     assert whatif_resp.status_code == 200
     adjusted_data = whatif_resp.json()
     assert adjusted_data["adjusted_risk_score"] > initial_risk
-    assert adjusted_data["delta"] == 20.0  # 50.0 * 0.4
+    assert adjusted_data["delta"] == pytest.approx(0.20)  # 50.0 * 0.4 / 100 = 0.20 fractional
 
 @pytest.mark.tier4
 async def test_scenario_3_complaint_and_transit_correlation(client, auth_headers):

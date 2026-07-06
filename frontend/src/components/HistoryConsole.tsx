@@ -1,5 +1,5 @@
 import React from 'react';
-import { History, X, Trash2, Clock } from 'lucide-react';
+import { History, X, Trash2, Clock, Shield } from 'lucide-react';
 import type { SituationBrief } from './types';
 
 interface HistoryConsoleProps {
@@ -11,6 +11,28 @@ interface HistoryConsoleProps {
   onClearHistory: () => void;
 }
 
+// ─── Risk helpers ──────────────────────────────────────────────
+const getRiskColor = (score: number) =>
+  score < 0.35 ? 'var(--risk-low)' : score < 0.70 ? 'var(--risk-med)' : 'var(--risk-high)';
+
+const getRiskBg = (score: number) =>
+  score < 0.35 ? 'rgba(61,214,163,0.1)' : score < 0.70 ? 'rgba(240,180,41,0.1)' : 'rgba(240,69,58,0.1)';
+
+const getRiskLabel = (score: number) =>
+  score < 0.35 ? 'LOW' : score < 0.70 ? 'MED' : 'HIGH';
+
+// ─── Relative time helper ────────────────────────────────────────
+const relTime = (iso?: string) => {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60)  return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60)  return `${mins}m ago`;
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+// ─── Main Component ──────────────────────────────────────────────
 export const HistoryConsole: React.FC<HistoryConsoleProps> = ({
   isOpen,
   onToggle,
@@ -19,92 +41,122 @@ export const HistoryConsole: React.FC<HistoryConsoleProps> = ({
   onSelectBrief,
   onClearHistory,
 }) => {
-  const getRiskClass = (score: number) => {
-    if (score < 0.35) return 'low';
-    if (score < 0.70) return 'med';
-    return 'high';
-  };
-
-  const getRiskText = (score: number) => {
-    if (score < 0.35) return 'LOW';
-    if (score < 0.70) return 'MED';
-    return 'HIGH';
-  };
-
   return (
-    <div className={`history-sidebar-container ${isOpen ? 'open' : ''}`} id="history-console-sidebar">
-      {/* Sidebar trigger */}
-      <button 
-        className="history-sidebar-trigger" 
+    <div
+      className={`history-sidebar-container ${isOpen ? 'open' : ''}`}
+      id="history-console-sidebar"
+    >
+      {/* ── Collapse / Expand Tab ── */}
+      <button
+        className="history-sidebar-trigger"
         onClick={onToggle}
-        title="Toggle Session History"
+        title={isOpen ? 'Close session log' : 'Open session log'}
         aria-label="Toggle Session History"
         id="btn-toggle-history"
       >
-        {isOpen ? <X size={20} /> : <History size={20} />}
+        {isOpen ? <X size={18} /> : <History size={18} />}
       </button>
 
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="history-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <History size={18} color="var(--accent-cyan)" />
-          <h3 style={{ fontSize: '15px' }}>SESSION ROOM</h3>
+        <div className="history-header-title">
+          <History size={13} color="var(--accent-cyan)" />
+          Session Log
+          {history.length > 0 && (
+            <span style={{
+              fontSize: '9px',
+              fontFamily: 'var(--font-mono)',
+              padding: '1px 5px',
+              borderRadius: '4px',
+              background: 'var(--accent-cyan-dim)',
+              color: 'var(--accent-cyan)',
+              border: '1px solid var(--border-glow)',
+            }}>
+              {history.length}
+            </span>
+          )}
         </div>
+
         {history.length > 0 && (
           <button
+            className="clear-btn"
             onClick={onClearHistory}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-muted)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '4px',
-              transition: 'color var(--transition-fast)',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-high)')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
-            title="Clear History"
+            title="Clear all history"
             aria-label="Clear History"
             id="btn-clear-history"
           >
-            <Trash2 size={16} />
+            <Trash2 size={12} />
           </button>
         )}
       </div>
 
-      {/* List */}
+      {/* ── List ── */}
       <div className="history-list">
         {history.length === 0 ? (
           <div className="history-empty">
-            <Clock size={36} className="history-empty-icon" />
-            <p style={{ fontSize: '12px' }}>No session logs saved.</p>
+            <Clock size={28} strokeWidth={1.5} style={{ color: 'var(--text-muted)' }} />
+            <p>No session briefs yet. Run a query to start populating the log.</p>
           </div>
         ) : (
           history.map((brief) => {
-            const riskClass = getRiskClass(brief.risk_score);
-            const isActive = activeBriefId === brief.brief_id;
-            
+            const isActive  = activeBriefId === brief.brief_id;
+            const riskColor = getRiskColor(brief.risk_score);
+            const riskBg    = getRiskBg(brief.risk_score);
+            const riskLabel = getRiskLabel(brief.risk_score);
+            const riskPct   = Math.round(brief.risk_score * 100);
+
             return (
               <button
                 key={brief.brief_id}
                 className={`history-item ${isActive ? 'active' : ''}`}
                 onClick={() => onSelectBrief(brief)}
                 id={`history-item-${brief.brief_id}`}
-                style={{ background: 'rgba(18, 22, 31, 0.5)', border: '1px solid var(--border-color)', width: '100%' }}
               >
-                <div className="history-item-question">
-                  Sector: {brief.sector_id}
+                {/* Sector name */}
+                <div className="history-item-sector">
+                  {brief.sector_id.replace('_', ' ').toUpperCase()}
                 </div>
+
+                {/* Meta row */}
                 <div className="history-item-meta">
-                  <span className={`history-item-risk ${riskClass}`}>
-                    Risk: {getRiskText(brief.risk_score)} ({Math.round(brief.risk_score * 100)}%)
+                  {/* Risk badge */}
+                  <span
+                    className="history-risk-badge"
+                    style={{
+                      color: riskColor,
+                      background: riskBg,
+                      border: `1px solid ${riskColor}33`,
+                    }}
+                  >
+                    <Shield
+                      size={8}
+                      style={{ display: 'inline', marginRight: '3px', verticalAlign: 'middle' }}
+                    />
+                    {riskLabel} · {riskPct}%
                   </span>
-                  <span>
-                    {brief.generated_at ? new Date(brief.generated_at).toLocaleTimeString() : 'N/A'}
+
+                  {/* Timestamp */}
+                  <span className="history-item-time">
+                    {relTime(brief.generated_at)}
                   </span>
+                </div>
+
+                {/* Tiny risk bar */}
+                <div style={{
+                  height: '2px',
+                  background: 'rgba(255,255,255,0.05)',
+                  borderRadius: '99px',
+                  overflow: 'hidden',
+                  marginTop: '6px',
+                }}>
+                  <div style={{
+                    width: `${riskPct}%`,
+                    height: '100%',
+                    background: riskColor,
+                    borderRadius: '99px',
+                    boxShadow: `0 0 4px ${riskColor}`,
+                    transition: 'width 0.6s ease',
+                  }} />
                 </div>
               </button>
             );

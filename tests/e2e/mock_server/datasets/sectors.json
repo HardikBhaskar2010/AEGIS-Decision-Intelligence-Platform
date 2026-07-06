@@ -1,23 +1,23 @@
 [
   {
     "sector_id": "sector_7",
-    "name": "Sector 7 - Downtown Core",
-    "lat": 12.9716,
-    "lng": 77.5946,
+    "name": "Downtown / Civic Center",
+    "lat": 1.2903,
+    "lng": 103.8520,
     "population": 85000
   },
   {
     "sector_id": "sector_3",
-    "name": "Sector 3 - Industrial Zone",
-    "lat": 12.9250,
-    "lng": 77.5897,
-    "population": 42000
+    "name": "Jurong Industrial",
+    "lat": 1.3263,
+    "lng": 103.7384,
+    "population": 95000
   },
   {
     "sector_id": "sector_1",
-    "name": "Sector 1 - Residential East",
-    "lat": 12.9562,
-    "lng": 77.7011,
+    "name": "Changi Logistics Hub",
+    "lat": 1.3644,
+    "lng": 103.9915,
     "population": 120000
   }
 ]

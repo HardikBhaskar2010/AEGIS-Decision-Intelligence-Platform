@@ -307,7 +307,7 @@ async def test_tier1_whatif_simulation_positive_delta(client, auth_headers):
     assert data["brief_id"] == brief_id
     expected_risk = min(1.0, max(0.0, original_risk + (10.0 * 0.4 / 100.0)))
     assert data["adjusted_risk_score"] == pytest.approx(expected_risk)
-    assert data["delta"] == pytest.approx((expected_risk - original_risk) * 100.0)
+    assert data["delta"] == pytest.approx(expected_risk - original_risk)
     assert "narrative_delta" in data
 
 @pytest.mark.tier1
@@ -334,7 +334,7 @@ async def test_tier1_whatif_simulation_negative_delta(client, auth_headers):
     assert data["brief_id"] == brief_id
     expected_risk = min(1.0, max(0.0, original_risk + (-15.0 * 0.4 / 100.0)))
     assert data["adjusted_risk_score"] == pytest.approx(expected_risk)
-    assert data["delta"] == pytest.approx((expected_risk - original_risk) * 100.0)
+    assert data["delta"] == pytest.approx(expected_risk - original_risk)
 
 @pytest.mark.tier1
 async def test_tier1_whatif_simulation_zero_delta(client, auth_headers):

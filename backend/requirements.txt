@@ -5,3 +5,5 @@ google-cloud-bigquery==3.24.0
 google-cloud-firestore==2.16.0
 firebase-admin==6.5.0
 google-genai==0.3.0
+# ADK multi-agent orchestration (agent_workflow.py falls back to mocks when absent)
+google-adk>=0.1.0

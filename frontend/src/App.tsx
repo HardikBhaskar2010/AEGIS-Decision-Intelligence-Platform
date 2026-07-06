@@ -1,679 +1,516 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MaplibreMap } from './components/MaplibreMap';
-import { AgentFlowGraph } from './components/AgentFlowGraph';
-import { SituationBriefCard } from './components/SituationBriefCard';
-import { HistoryConsole } from './components/HistoryConsole';
+import { MaplibreMap }         from './components/MaplibreMap';
+import { AgentFlowGraph }      from './components/AgentFlowGraph';
+import { SituationBriefCard }  from './components/SituationBriefCard';
+import { HistoryConsole }       from './components/HistoryConsole';
 import type { Sector, SituationBrief, WhatIfResult, AgentEvent } from './components/types';
-import { Play, ShieldCheck, Database, Terminal } from 'lucide-react';
+import { Play, ShieldCheck, Database, Terminal, History, Zap } from 'lucide-react';
 import Lenis from '@studio-freight/lenis';
+import gsap from 'gsap';
 
-// Base API configurations
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
+// ──────────────────────────────────────────────────────────────────────────
+// Config
+// ──────────────────────────────────────────────────────────────────────────
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const WS_BASE  = import.meta.env.VITE_WS_URL  || 'ws://localhost:8000';
 
-// Initial seed sectors to render on map before database queries or if offline
+// ──────────────────────────────────────────────────────────────────────────
+// Seed Sectors — Singapore canonical (aligned with config.py)
+// ──────────────────────────────────────────────────────────────────────────
 const SEED_SECTORS: Sector[] = [
-  { sector_id: 'sector_7', name: 'Sector 7 - Downtown Core', lat: 12.9716, lng: 77.5946, population: 85000, risk_score: 0.18 },
-  { sector_id: 'sector_3', name: 'Sector 3 - Industrial Zone', lat: 12.9250, lng: 77.5897, population: 42000, risk_score: 0.76 },
-  { sector_id: 'sector_1', name: 'Sector 1 - Residential East', lat: 12.9562, lng: 77.7011, population: 120000, risk_score: 0.42 },
-  { sector_id: 'sector_2', name: 'Sector 2 - Tech Park', lat: 12.8399, lng: 77.6770, population: 250000, risk_score: 0.22 },
-  { sector_id: 'sector_4', name: 'Sector 4 - Commercial West', lat: 13.0298, lng: 77.5407, population: 175000, risk_score: 0.15 },
-  { sector_id: 'sector_5', name: 'Sector 5 - Airport Road', lat: 13.1989, lng: 77.7068, population: 280000, risk_score: 0.31 },
-  { sector_id: 'sector_6', name: 'Sector 6 - University Hub', lat: 12.9343, lng: 77.6055, population: 260000, risk_score: 0.28 },
-  { sector_id: 'sector_8', name: 'Sector 8 - Logistics Park', lat: 13.0478, lng: 77.5255, population: 145000, risk_score: 0.19 },
-  { sector_id: 'sector_9', name: 'Sector 9 - Medical District', lat: 12.9856, lng: 77.5361, population: 98000, risk_score: 0.25 },
-  { sector_id: 'sector_10', name: 'Sector 10 - Tourism Zone', lat: 12.9719, lng: 77.6412, population: 15000, risk_score: 0.49 },
+  { sector_id: 'sector_7',  name: 'Downtown / Civic Center',    lat: 1.2903,  lng: 103.8520, population:  85000, risk_score: 0.68 },
+  { sector_id: 'sector_3',  name: 'Jurong Industrial',           lat: 1.3263,  lng: 103.7384, population:  95000, risk_score: 0.24 },
+  { sector_id: 'sector_1',  name: 'Changi Logistics Hub',        lat: 1.3644,  lng: 103.9915, population: 120000, risk_score: 0.42 },
+  { sector_id: 'sector_2',  name: 'Marina Bay Financial',        lat: 1.2798,  lng: 103.8514, population: 250000, risk_score: 0.19 },
+  { sector_id: 'sector_4',  name: 'Woodlands Crossing',          lat: 1.4382,  lng: 103.7862, population: 175000, risk_score: 0.15 },
+  { sector_id: 'sector_5',  name: 'Ang Mo Kio Heartland',        lat: 1.3691,  lng: 103.8454, population: 280000, risk_score: 0.31 },
+  { sector_id: 'sector_6',  name: 'Bedok Waterfront',            lat: 1.3240,  lng: 103.9297, population: 260000, risk_score: 0.28 },
+  { sector_id: 'sector_8',  name: 'Tampines Regional',           lat: 1.3496,  lng: 103.9568, population: 245000, risk_score: 0.22 },
+  { sector_id: 'sector_9',  name: 'Queenstown Heritage',         lat: 1.2978,  lng: 103.8052, population:  98000, risk_score: 0.37 },
+  { sector_id: 'sector_10', name: 'Sentosa Resort Island',       lat: 1.2494,  lng: 103.8303, population:  15000, risk_score: 0.55 },
 ];
 
-// Map of agent states structure
+// ──────────────────────────────────────────────────────────────────────────
+// Agent State Types
+// ──────────────────────────────────────────────────────────────────────────
 interface AgentStates {
-  [key: string]: {
-    state: 'idle' | 'active' | 'done';
-    statusText: string;
-  };
+  [key: string]: { state: 'idle' | 'active' | 'done'; statusText: string };
 }
 
 const INITIAL_AGENT_STATES: AgentStates = {
   orchestrator: { state: 'idle', statusText: 'Standby' },
-  query: { state: 'idle', statusText: 'Standby' },
-  correlation: { state: 'idle', statusText: 'Standby' },
-  forecast: { state: 'idle', statusText: 'Standby' },
-  narrative: { state: 'idle', statusText: 'Standby' },
+  query:        { state: 'idle', statusText: 'Standby' },
+  correlation:  { state: 'idle', statusText: 'Standby' },
+  forecast:     { state: 'idle', statusText: 'Standby' },
+  narrative:    { state: 'idle', statusText: 'Standby' },
 };
 
+// ──────────────────────────────────────────────────────────────────────────
+// Quick demo prompts
+// ──────────────────────────────────────────────────────────────────────────
+const DEMO_PROMPTS: { label: string; sector: string; query: string }[] = [
+  { label: '🌧 Downtown Flood Alert',   sector: 'sector_7', query: 'Assess multi-domain risk and utility outages in Downtown Civic Center Sector 7' },
+  { label: '⚡ Jurong Power Grid',       sector: 'sector_3', query: 'Evaluate power grid anomalies and industrial transit delays in Jurong Industrial Zone' },
+  { label: '🛫 Changi Storm Forecast',  sector: 'sector_1', query: 'Forecast weather impact on Changi Logistics Hub sector operations' },
+];
+
+// ──────────────────────────────────────────────────────────────────────────
+// App
+// ──────────────────────────────────────────────────────────────────────────
 function App() {
-  const [sectors, setSectors] = useState<Sector[]>(SEED_SECTORS);
-  const [selectedSectorId, setSelectedSectorId] = useState<string | null>(null);
-  const [activeBrief, setActiveBrief] = useState<SituationBrief | null>(null);
-  const [isBriefLoading, setIsBriefLoading] = useState<boolean>(false);
-  
-  // What-If Simulation State
-  const [whatIfResult, setWhatIfResult] = useState<WhatIfResult | null>(null);
-  const [isWhatIfLoading, setIsWhatIfLoading] = useState<boolean>(false);
-  
-  // Console History
-  const [history, setHistory] = useState<SituationBrief[]>([]);
-  const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
-  
-  // Prompt Input
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [sessionMode, setSessionMode] = useState<'live' | 'simulation'>('simulation');
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'offline'>('offline');
-  const [sessionId, setSessionId] = useState<string>('');
+  const [sectors,         setSectors]         = useState<Sector[]>(SEED_SECTORS);
+  const [selectedId,      setSelectedId]      = useState<string | null>(null);
+  const [activeBrief,     setActiveBrief]     = useState<SituationBrief | null>(null);
+  const [briefLoading,    setBriefLoading]    = useState(false);
+  const [whatIfResult,    setWhatIfResult]    = useState<WhatIfResult | null>(null);
+  const [whatIfLoading,   setWhatIfLoading]   = useState(false);
+  const [history,         setHistory]         = useState<SituationBrief[]>([]);
+  const [historyOpen,     setHistoryOpen]     = useState(false);
+  const [searchQuery,     setSearchQuery]     = useState('');
+  const [sessionMode,     setSessionMode]     = useState<'live' | 'simulation'>('simulation');
+  const [connStatus,      setConnStatus]      = useState<'connected' | 'offline'>('offline');
+  const [sessionId,       setSessionId]       = useState('');
+  const [agentStates,     setAgentStates]     = useState<AgentStates>(INITIAL_AGENT_STATES);
 
-  // Agent Node Execution Graph state
-  const [agentStates, setAgentStates] = useState<AgentStates>(INITIAL_AGENT_STATES);
+  const wsRef      = useRef<WebSocket | null>(null);
+  const lenisRef   = useRef<Lenis | null>(null);
+  const headerRef  = useRef<HTMLElement>(null);
+  const consoleRef = useRef<HTMLDivElement>(null);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const lenisRef = useRef<Lenis | null>(null);
-
-  // Initialize Session ID & Smooth Scrolling
+  // ── Init: session ID, Lenis smooth scroll, GSAP header animation ────────
   useEffect(() => {
-    // Generate unique session ID for streaming
-    const randomId = 'session_' + Math.random().toString(36).substring(2, 10);
-    setSessionId(randomId);
+    setSessionId('session_' + Math.random().toString(36).substring(2, 10));
 
-    // Initialize smooth scrolling with Lenis
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      orientation: 'vertical',
-      smoothWheel: true,
-    });
-
-    function raf(time: number) {
-      lenis.raf(time);
+    // Smooth scroll for console panel
+    if (consoleRef.current) {
+      const lenis = new Lenis({
+        wrapper: consoleRef.current,
+        content: consoleRef.current,
+        duration: 1.1,
+        easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+        orientation: 'vertical',
+        smoothWheel: true,
+      });
+      const raf = (time: number) => { lenis.raf(time); requestAnimationFrame(raf); };
       requestAnimationFrame(raf);
+      lenisRef.current = lenis;
     }
-    requestAnimationFrame(raf);
-    lenisRef.current = lenis;
 
-    // Load initial history from localStorage if any
+    // GSAP header slide-in on mount
+    if (headerRef.current) {
+      gsap.fromTo(headerRef.current,
+        { y: -60, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.7, ease: 'power3.out', delay: 0.1 }
+      );
+    }
+
+    // Load persisted history
     const saved = localStorage.getItem('aegis_history');
     if (saved) {
-      try {
-        setHistory(JSON.parse(saved));
-      } catch (e) {
-        console.error('Failed to parse saved history', e);
-      }
+      try { setHistory(JSON.parse(saved)); } catch { /* ignore */ }
     }
 
-    return () => {
-      lenis.destroy();
-    };
+    return () => { lenisRef.current?.destroy(); };
   }, []);
 
-  // Fetch live operational sectors from backend on load
-  const fetchSectors = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/sectors`, {
-        headers: { 'Authorization': 'Bearer mock_firebase_token' }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data) && data.length > 0) {
-          setSectors(data);
+  // ── Fetch live sectors ───────────────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await fetch(`${API_BASE}/api/v1/sectors`, {
+          headers: { Authorization: 'Bearer mock-test-token-key' },
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (Array.isArray(data) && data.length > 0) setSectors(data);
+          setConnStatus('connected');
+          setSessionMode('live');
         }
-        setConnectionStatus('connected');
-        setSessionMode('live');
-      } else {
-        setConnectionStatus('offline');
+      } catch {
+        setConnStatus('offline');
         setSessionMode('simulation');
       }
-    } catch (e) {
-      console.log('Backend not detected. Falling back to frontend simulation mode.');
-      setConnectionStatus('offline');
-      setSessionMode('simulation');
-    }
+    })();
   }, []);
 
-  useEffect(() => {
-    fetchSectors();
-  }, [fetchSectors]);
-
-  // Connect to websocket stream for session events
-  const connectWebSocket = useCallback((id: string) => {
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
-
-    try {
-      const ws = new WebSocket(`${WS_BASE_URL}/ws/agent-events/${id}`);
-      
-      ws.onopen = () => {
-        console.log('WS event stream connected:', id);
-        setConnectionStatus('connected');
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const payload: AgentEvent = JSON.parse(event.data);
-          handleAgentEvent(payload);
-        } catch (err) {
-          console.error('Failed to parse WS payload', err);
-        }
-      };
-
-      ws.onclose = () => {
-        console.log('WS event stream closed');
-      };
-
-      ws.onerror = () => {
-        console.log('WS error encountered, falling back to simulated event emitters.');
-      };
-
-      wsRef.current = ws;
-    } catch (e) {
-      console.error('WebSocket connection failed:', e);
-    }
-  }, []);
-
-  // Process a single agent state change event
-  const handleAgentEvent = useCallback((event: AgentEvent) => {
-    const agentKey = event.agent.toLowerCase();
-    
-    setAgentStates((prev) => {
-      const updated = { ...prev };
-      
-      if (!updated[agentKey]) return prev;
-
-      if (event.type === 'agent_start') {
-        updated[agentKey] = {
-          state: 'active',
-          statusText: event.summary || 'Processing...',
-        };
-      } else if (event.type === 'tool_call') {
-        updated[agentKey] = {
-          state: 'active',
-          statusText: `Tool: ${event.tool || 'Querying'}`,
-        };
-      } else if (event.type === 'agent_result' || event.type === 'final_brief') {
-        updated[agentKey] = {
-          state: 'done',
-          statusText: event.summary || 'Complete',
-        };
+  // ── WebSocket: agent event stream ────────────────────────────────────────
+  const handleAgentEvent = useCallback((ev: AgentEvent) => {
+    const key = ev.agent.toLowerCase();
+    setAgentStates(prev => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      if (ev.type === 'agent_start') {
+        next[key] = { state: 'active', statusText: ev.summary || 'Processing…' };
+      } else if (ev.type === 'tool_call') {
+        next[key] = { state: 'active', statusText: `Tool: ${ev.tool || 'Querying'}` };
+      } else if (ev.type === 'agent_result' || ev.type === 'final_brief') {
+        next[key] = { state: 'done', statusText: ev.summary || 'Complete' };
       }
-
-      // If Orchestrator completes, mark everything else done if they were running
-      if (agentKey === 'orchestrator' && event.type === 'final_brief') {
-        Object.keys(updated).forEach(k => {
-          if (updated[k].state === 'active') {
-            updated[k] = { state: 'done', statusText: 'Complete' };
-          }
-        });
-      }
-
-      return updated;
+      return next;
     });
   }, []);
 
-  // Local simulated WebSocket stream for standalone demo
-  const runSimulatedAgentGraph = useCallback(async (sectorId: string) => {
-    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-    
+  const connectWS = useCallback((id: string) => {
+    wsRef.current?.close();
+    try {
+      const ws = new WebSocket(`${WS_BASE}/ws/agent-events/${id}`);
+      ws.onmessage = (e) => {
+        try { handleAgentEvent(JSON.parse(e.data)); } catch { /* ignore */ }
+      };
+      wsRef.current = ws;
+    } catch { /* fallback to simulation */ }
+  }, [handleAgentEvent]);
+
+  // ── Simulated agent animation (offline mode) ─────────────────────────────
+  const runSimulatedGraph = useCallback(async (sectorId: string): Promise<SituationBrief> => {
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
     setAgentStates(INITIAL_AGENT_STATES);
     await sleep(200);
 
-    // 1. Orchestrator Starts
-    handleAgentEvent({
-      type: 'agent_start',
-      agent: 'Orchestrator',
-      summary: 'Task routed. Generating execution plan...',
-      ts: new Date().toISOString()
-    });
-    await sleep(1000);
+    const steps: [string, string, string, number][] = [
+      ['agent_start',  'Orchestrator', 'Routing task to specialist agents…',     800],
+      ['agent_start',  'Query',        'Translating NL → BigQuery SQL…',         1000],
+      ['tool_call',    'Query',        'BigQuery.query_read_only',                1200],
+      ['agent_result', 'Query',        '42 rows retrieved across 4 domains.',    600],
+      ['agent_start',  'Correlation',  'Running z-score anomaly detection…',     1400],
+      ['agent_result', 'Correlation',  '3 corroborating signals found.',         600],
+      ['agent_start',  'Forecast',     'Calculating predictive time-series…',    1200],
+      ['agent_result', 'Forecast',     'Risk trajectory forecasted: +12%/hr.',   500],
+      ['agent_start',  'Narrative',    'Synthesizing brief (Gemini 3.1 Pro)…',   1600],
+      ['agent_result', 'Narrative',    'Narrative grounded and validated.',       500],
+      ['final_brief',  'Orchestrator', 'Brief generated successfully.',           0],
+    ];
 
-    // 2. Query Agent Starts & runs SQL
-    handleAgentEvent({
-      type: 'agent_start',
-      agent: 'Query',
-      summary: 'Translating request to BigQuery SQL...',
-      ts: new Date().toISOString()
-    });
-    await sleep(1200);
-    handleAgentEvent({
-      type: 'tool_call',
-      agent: 'Query',
-      tool: 'BigQuery.query_read_only',
-      ts: new Date().toISOString()
-    });
-    await sleep(1500);
-    handleAgentEvent({
-      type: 'agent_result',
-      agent: 'Query',
-      summary: 'Retrieved 42 data rows.',
-      ts: new Date().toISOString()
-    });
-    await sleep(800);
-
-    // 3. Correlation Agent analyzes anomalies
-    handleAgentEvent({
-      type: 'agent_start',
-      agent: 'Correlation',
-      summary: 'Running multi-domain statistical z-score...',
-      ts: new Date().toISOString()
-    });
-    await sleep(1800);
-    handleAgentEvent({
-      type: 'agent_result',
-      agent: 'Correlation',
-      summary: 'Identified rainfall-outage correlation.',
-      ts: new Date().toISOString()
-    });
-    await sleep(800);
-
-    // 4. Forecast Agent models risk trajectory
-    handleAgentEvent({
-      type: 'agent_start',
-      agent: 'Forecast',
-      summary: 'Calculating predictive time-series...',
-      ts: new Date().toISOString()
-    });
-    await sleep(1500);
-    handleAgentEvent({
-      type: 'agent_result',
-      agent: 'Forecast',
-      summary: 'Trajectory forecasted.',
-      ts: new Date().toISOString()
-    });
-    await sleep(600);
-
-    // 5. Narrative Agent synthesizes report
-    handleAgentEvent({
-      type: 'agent_start',
-      agent: 'Narrative',
-      summary: 'Generating Gemini 3.1 Pro summary report...',
-      ts: new Date().toISOString()
-    });
-    await sleep(2000);
-    handleAgentEvent({
-      type: 'agent_result',
-      agent: 'Narrative',
-      summary: 'Narrative report grounded.',
-      ts: new Date().toISOString()
-    });
-    await sleep(600);
-
-    // 6. Complete
-    handleAgentEvent({
-      type: 'final_brief',
-      agent: 'Orchestrator',
-      summary: 'Brief generated successfully.',
-      ts: new Date().toISOString()
-    });
-
-    // Return mock brief
-    const targetSector = SEED_SECTORS.find(s => s.sector_id === sectorId) || SEED_SECTORS[0];
-    const risk = targetSector.risk_score;
-    let narrative = `An inspection of the ${targetSector.name} sector indicates a nominal risk trajectory. Meteorological forecasts display clear skies with no immediate utility outages reported. Citizen feedback sentiments remain net neutral (72% positive). No corrective measures required.`;
-    let recommendation = 'Maintain standard monitoring protocols. Inspect drainage systems in routine cycles.';
-
-    if (risk >= 0.70) {
-      narrative = `CRITICAL ALERT: Multi-domain anomaly detected in ${targetSector.name} (${sectorId}). Heavy rainfall (95mm/hr peak) has overloaded localized storm drains. This correlates directly with a sub-station utility outage (#OUT-9021) and an 82% spike in adverse citizen feedback complaints describing flooded basement car parks. Synthetic sentiment pass detects high distress levels.`;
-      recommendation = 'Deploy emergency drainage crews to sector boundaries. Re-route heavy transit lanes around low-lying roads. Activate localized backup sub-stations.';
-    } else if (risk >= 0.35) {
-      narrative = `ELEVATED RISK: Minor anomalies observed in ${targetSector.name} (${sectorId}). Gen-AI sentiment rollup highlights citizen complaints regarding transit delays on line-B4. Local weather sensors indicate moderate storm bands passing through with a 45% chance of street-level ponding in the next 3 hours.`;
-      recommendation = 'Pre-position transit response vehicles. Advise drivers to reduce speeds. Verify flood gate triggers.';
+    for (const [type, agent, summary, delay] of steps) {
+      handleAgentEvent({ type: type as AgentEvent['type'], agent, summary, ts: new Date().toISOString() });
+      if (delay) await sleep(delay);
     }
 
-    const mockBrief: SituationBrief = {
+    // Build mock brief
+    const sector = SEED_SECTORS.find(s => s.sector_id === sectorId) ?? SEED_SECTORS[0];
+    const risk   = sector.risk_score;
+
+    let narrative = '';
+    let recommendation = '';
+
+    if (risk >= 0.70) {
+      narrative = `CRITICAL: Multi-domain cascading failure detected in ${sector.name}. Heavy rainfall (95mm/hr) has overwhelmed storm drains — correlating directly with sub-station utility outage #OUT-9021 and an 82% spike in citizen distress reports (waterlogging, power loss). Three independent signals converge on the same 3-hour window.`;
+      recommendation = 'Deploy emergency drainage crews to sector boundaries | Re-route heavy transit lanes | Activate backup sub-stations within 2 hours | Issue civic alert to residents';
+    } else if (risk >= 0.35) {
+      narrative = `ELEVATED: Minor anomalies detected in ${sector.name}. Sentiment analysis surfaces complaints regarding transit delays on line-B4. Local sensors indicate moderate storm bands passing — 45% probability of street-level ponding within 3 hours. Utility status nominal but flagged for monitoring.`;
+      recommendation = 'Pre-position response vehicles at sector entry points | Advise reduced transit speeds | Verify flood gate triggers | Monitor utility telemetry';
+    } else {
+      narrative = `NOMINAL: ${sector.name} displays stable operational metrics. Weather sensors indicate clear conditions, utility infrastructure is fully operational, and citizen feedback sentiment is 78% positive. No corrective action required.`;
+      recommendation = 'Maintain standard automated monitoring | Schedule routine drainage inspection next cycle';
+    }
+
+    return {
       brief_id: 'brief_' + Math.random().toString(36).substring(2, 10),
-      sector_id: targetSector.sector_id,
+      sector_id: sector.sector_id,
       risk_score: risk,
-      confidence: 0.85 + Math.random() * 0.1,
+      confidence: 0.85 + Math.random() * 0.12,
       recommendation,
       narrative,
       sources: {
-        sql: `SELECT s.sector_id, w.severity, u.status, f.sentiment\nFROM \`aegis-platform.core.sectors\` s\nLEFT JOIN \`aegis-platform.core.weather_events\` w ON s.sector_id = w.sector_id\nLEFT JOIN \`aegis-platform.core.utility_status\` u ON s.sector_id = u.sector_id\nLEFT JOIN \`aegis-platform.core.citizen_feedback\` f ON s.sector_id = f.sector_id\nWHERE s.sector_id = '${sectorId}'\nORDER BY w.ts DESC LIMIT 10;`,
-        signals_used: [
-          'weather_sensor_level_8',
-          'power_outage_node_B',
-          'citizen_feedback_outage_sentiment',
-          'transit_delay_log_L12'
-        ]
+        sql: `SELECT s.sector_id, w.event_type, w.severity, u.status, u.utility_type,\n       t.status AS transit_status, COUNT(f.feedback_id) AS feedback_count\nFROM \`aegis-core.sectors\` s\nLEFT JOIN \`aegis-core.weather_events\`  w ON s.sector_id = w.sector_id AND w.ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 6 HOUR)\nLEFT JOIN \`aegis-core.utility_status\` u ON s.sector_id = u.sector_id\nLEFT JOIN \`aegis-core.transit_delays\` t ON s.sector_id = t.sector_id\nLEFT JOIN \`aegis-core.citizen_feedback\` f ON s.sector_id = f.sector_id AND f.ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 HOUR)\nWHERE s.sector_id = '${sectorId}'\nGROUP BY 1, 2, 3, 4, 5, 6\nORDER BY w.severity DESC LIMIT 10;`,
+        signals_used: ['weather_sensor_storm', 'utility_power_substation', 'transit_delay_log', 'citizen_feedback_sentiment'],
       },
-      generated_at: new Date().toISOString()
+      generated_at: new Date().toISOString(),
     };
-
-    return mockBrief;
   }, [handleAgentEvent]);
 
-  // Main operational query trigger
-  const runOperationalQuery = async (queryText: string, targetSectorId: string) => {
-    if (!targetSectorId) return;
-    
-    setIsBriefLoading(true);
+  // ── Main query runner ────────────────────────────────────────────────────
+  const runQuery = async (queryText: string, sectorId: string) => {
+    if (!sectorId || briefLoading) return;
+
+    setBriefLoading(true);
     setWhatIfResult(null);
     setSearchQuery(queryText);
+    setSelectedId(sectorId);
+
+    let brief: SituationBrief;
 
     if (sessionMode === 'live') {
-      connectWebSocket(sessionId);
+      connectWS(sessionId);
       try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/query`, {
+        const resp = await fetch(`${API_BASE}/api/v1/query`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer mock_firebase_token',
+            'Authorization': 'Bearer mock-test-token-key',
           },
-          body: JSON.stringify({
-            session_id: sessionId,
-            question: queryText,
-          }),
+          body: JSON.stringify({ session_id: sessionId, question: queryText }),
         });
-
-        if (response.ok) {
-          const brief: SituationBrief = await response.json();
-          setActiveBrief(brief);
-          updateHistory(brief);
-          
-          // Sync map sector risk
-          setSectors(prev => prev.map(s => 
-            s.sector_id === brief.sector_id ? { ...s, risk_score: brief.risk_score } : s
-          ));
+        if (resp.ok) {
+          brief = await resp.json();
         } else {
-          console.error('Workflow API failed, running simulation fallback.');
-          const fallbackBrief = await runSimulatedAgentGraph(targetSectorId);
-          setActiveBrief(fallbackBrief);
-          updateHistory(fallbackBrief);
+          brief = await runSimulatedGraph(sectorId);
         }
-      } catch (err) {
-        console.error('Failed to connect to API, running simulation.');
-        const fallbackBrief = await runSimulatedAgentGraph(targetSectorId);
-        setActiveBrief(fallbackBrief);
-        updateHistory(fallbackBrief);
-      } finally {
-        setIsBriefLoading(false);
+      } catch {
+        brief = await runSimulatedGraph(sectorId);
       }
     } else {
-      // Direct Simulation Mode
-      const brief = await runSimulatedAgentGraph(targetSectorId);
-      setActiveBrief(brief);
-      updateHistory(brief);
-      setIsBriefLoading(false);
+      brief = await runSimulatedGraph(sectorId);
     }
-  };
 
-  const updateHistory = (brief: SituationBrief) => {
+    setActiveBrief(brief);
+
+    // Sync map risk
+    setSectors(prev => prev.map(s =>
+      s.sector_id === brief.sector_id ? { ...s, risk_score: brief.risk_score } : s
+    ));
+
+    // Persist history
     setHistory(prev => {
-      // Remove duplicate of same sector to keep list clean
       const filtered = prev.filter(b => b.sector_id !== brief.sector_id);
-      const updated = [brief, ...filtered].slice(0, 15); // Cap at 15 items
+      const updated = [brief, ...filtered].slice(0, 15);
       localStorage.setItem('aegis_history', JSON.stringify(updated));
       return updated;
     });
+
+    setBriefLoading(false);
   };
 
-  // Run What-If simulation on Forecast agent
-  const handleWhatIfSubmit = async (rainfallIntensity: number) => {
+  // ── What-If simulation ───────────────────────────────────────────────────
+  const handleWhatIf = async (rainfall: number) => {
     if (!activeBrief) return;
-    setIsWhatIfLoading(true);
+    setWhatIfLoading(true);
 
-    if (sessionMode === 'live') {
+    if (sessionMode === 'live' && activeBrief.brief_id.startsWith('brief_')) {
+      // Only call API for real briefs
       try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/whatif`, {
+        const resp = await fetch(`${API_BASE}/api/v1/whatif`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer mock_firebase_token',
-          },
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer mock-test-token-key' },
           body: JSON.stringify({
             brief_id: activeBrief.brief_id,
-            adjustment: {
-              rainfall_intensity_pct: rainfallIntensity / 100,
-            },
+            adjustment: { rainfall_intensity_pct: rainfall },
           }),
         });
-
-        if (response.ok) {
-          const result: WhatIfResult = await response.json();
-          setWhatIfResult(result);
-        } else {
-          // Simulation fallback for what-if
-          await simulateWhatIf(rainfallIntensity);
+        if (resp.ok) {
+          setWhatIfResult(await resp.json());
+          setWhatIfLoading(false);
+          return;
         }
-      } catch (e) {
-        await simulateWhatIf(rainfallIntensity);
-      } finally {
-        setIsWhatIfLoading(false);
-      }
-    } else {
-      await simulateWhatIf(rainfallIntensity);
-      setIsWhatIfLoading(false);
+      } catch { /* fall through to simulation */ }
     }
-  };
 
-  const simulateWhatIf = async (val: number) => {
-    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-    
-    // Animate only Forecast and Narrative agents
-    setAgentStates(prev => ({
-      ...prev,
-      forecast: { state: 'active', statusText: 'Recalculating Trajectory...' },
-      narrative: { state: 'idle', statusText: 'Waiting...' }
-    }));
+    // Simulated what-if
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+    setAgentStates(prev => ({ ...prev, forecast: { state: 'active', statusText: 'Re-calculating trajectory…' } }));
+    await sleep(900);
+    setAgentStates(prev => ({ ...prev, forecast: { state: 'done', statusText: 'Trajectory updated.' }, narrative: { state: 'active', statusText: 'Re-synthesizing delta…' } }));
     await sleep(1000);
-    
-    setAgentStates(prev => ({
-      ...prev,
-      forecast: { state: 'done', statusText: 'Trajectory updated.' },
-      narrative: { state: 'active', statusText: 'Re-drafting delta...' }
-    }));
-    await sleep(1200);
+    setAgentStates(prev => ({ ...prev, narrative: { state: 'done', statusText: 'Delta synthesized.' } }));
 
-    setAgentStates(prev => ({
-      ...prev,
-      narrative: { state: 'done', statusText: 'Delta synthesized.' }
-    }));
-
-    if (!activeBrief) return;
-
-    // Calculate simulated results
-    const baselineRainfall = 50;
-    const deltaMultiplier = (val - baselineRainfall) / 100; // -0.5 to +0.5
-    
-    // Risk adjusts dynamically
-    let adjustedRisk = Math.min(1.0, Math.max(0.0, activeBrief.risk_score + deltaMultiplier * 0.45));
-    const delta = adjustedRisk - activeBrief.risk_score;
-
-    let narrative_delta = '';
-    if (val > 75) {
-      narrative_delta = `Critical storm bands simulated. An increase of rainfall to ${val}% pushes the drainage systems past capacity, escalating flood triggers in the lower sectors. Trajectory indicates +${Math.round(delta*100)}% risk increase.`;
-    } else if (val < 30) {
-      narrative_delta = `Reduced precipitation simulated. Rainfall dialed down to ${val}%. Ponding levels recede completely, relieving pressure on primary retention structures. Risk drops by ${Math.abs(Math.round(delta*100))}%.`;
-    } else {
-      narrative_delta = `Nominal adjustments simulated. Rainfall levels maintained at ${val}% within safe containment limits. Operational risk is stabilized.`;
-    }
+    const base   = activeBrief.risk_score;
+    const delta  = (rainfall - 50) / 100 * 0.45;
+    const adj    = Math.min(1.0, Math.max(0.0, base + delta));
 
     setWhatIfResult({
       brief_id: activeBrief.brief_id,
-      adjusted_risk_score: adjustedRisk,
-      delta,
-      narrative_delta,
+      adjusted_risk_score: adj,
+      delta: adj - base,
+      narrative_delta: rainfall > 70
+        ? `Critical storm bands simulated at ${rainfall}% intensity. Drainage systems overwhelmed — flood triggers activated in lower zones. Risk escalates +${Math.round((adj - base) * 100)}%.`
+        : rainfall < 30
+        ? `Reduced precipitation at ${rainfall}%. Ponding levels recede — street flooding risk normalized. Risk reduced by ${Math.abs(Math.round((adj - base) * 100))}%.`
+        : `Nominal rainfall at ${rainfall}%. Operational parameters stabilized within safe containment thresholds.`,
     });
+
+    setWhatIfLoading(false);
   };
 
+  // ── Sector click from map ────────────────────────────────────────────────
   const handleSelectSector = (sector: Sector) => {
-    setSelectedSectorId(sector.sector_id);
-    const mockQueryText = `Assess operational risk factors and anomalies in ${sector.name} sector.`;
-    setSearchQuery(mockQueryText);
-    runOperationalQuery(mockQueryText, sector.sector_id);
+    const q = `Assess operational risk and anomalies in ${sector.name} sector`;
+    runQuery(q, sector.sector_id);
   };
 
+  // ── Form submit ──────────────────────────────────────────────────────────
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!searchQuery.trim()) return;
+    const q = searchQuery.trim();
+    if (!q) return;
 
-    // Find if user query matches any sector name
-    const text = searchQuery.toUpperCase();
-    const matchedSector = sectors.find(s => 
-      text.includes(s.sector_id) || 
-      text.includes(s.name.toUpperCase().split(' ')[0])
+    const lower  = q.toLowerCase();
+    const match  = sectors.find(s =>
+      lower.includes(s.sector_id) ||
+      lower.includes(s.name.toLowerCase().split(' ')[0]) ||
+      lower.includes(s.sector_id.replace('sector_', 'sector '))
     );
-
-    const targetId = matchedSector ? matchedSector.sector_id : (selectedSectorId || 'JURONG');
-    if (matchedSector) {
-      setSelectedSectorId(matchedSector.sector_id);
-    }
-    
-    runOperationalQuery(searchQuery, targetId);
+    const target = match?.sector_id ?? selectedId ?? 'sector_7';
+    if (match) setSelectedId(match.sector_id);
+    runQuery(q, target);
   };
 
-  const handleClearHistory = () => {
-    setHistory([]);
-    localStorage.removeItem('aegis_history');
-  };
-
-  const handleSelectBriefFromHistory = (brief: SituationBrief) => {
-    setActiveBrief(brief);
-    setSelectedSectorId(brief.sector_id);
-    setSearchQuery(`Assess operational risk factors and anomalies in ${brief.sector_id} sector.`);
-    setAgentStates(INITIAL_AGENT_STATES);
-    setWhatIfResult(null);
-  };
-
+  // ──────────────────────────────────────────────────────────────────────────
+  // Render
+  // ──────────────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* Top Operations Header */}
-      <header className="dashboard-header">
+      {/* ── HEADER ── */}
+      <header className="dashboard-header" ref={headerRef}>
         <div className="header-brand">
           <div className="brand-logo">A</div>
-          <div>
-            <h1 className="brand-title">AEGIS</h1>
-            <p style={{ fontSize: '10px', color: 'var(--text-secondary)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-              Decision Intelligence Copilot
-            </p>
+          <div className="brand-text">
+            <div className="brand-title">AEGIS</div>
+            <div className="brand-subtitle">Decision Intelligence Platform</div>
           </div>
         </div>
 
-        <div className="header-status">
-          <div className="status-indicator">
-            <span style={{ color: 'var(--text-muted)' }}>Connection:</span>
-            <div className={`status-dot ${connectionStatus === 'connected' ? 'active' : 'error'}`} />
-            <span style={{ color: connectionStatus === 'connected' ? 'var(--accent-cyan)' : 'var(--accent-high)', fontWeight: 'bold' }}>
-              {connectionStatus === 'connected' ? 'ONLINE' : 'SANDBOXED'}
-            </span>
+        <div className="header-right">
+          {/* Connection status */}
+          <div className={`status-pill ${connStatus === 'connected' ? 'online' : 'offline'}`}>
+            <div className="dot" />
+            {connStatus === 'connected' ? 'LIVE' : 'SANDBOX'}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 10px' }}>
-            <span style={{ color: 'var(--text-muted)' }}>SESSION:</span>
-            <span style={{ color: 'var(--text-primary)' }}>{sessionId}</span>
+          {/* Session badge */}
+          <div className="session-badge" title={sessionId}>
+            <span style={{ color: 'var(--text-muted)' }}>SID</span>
+            <span>{sessionId}</span>
           </div>
+
+          {/* History toggle */}
+          <button
+            className={`header-icon-btn ${historyOpen ? 'active' : ''}`}
+            onClick={() => setHistoryOpen(!historyOpen)}
+            title="Toggle session log"
+            aria-label="Toggle session history"
+            id="btn-toggle-history-header"
+          >
+            <History size={16} />
+          </button>
         </div>
       </header>
 
-      {/* Main Grid Layout */}
+      {/* ── MAIN LAYOUT ── */}
       <main className="dashboard-layout">
-        
-        {/* Dockable Sidebar drawer */}
+
+        {/* ── History Sidebar ── */}
         <HistoryConsole
-          isOpen={isHistoryOpen}
-          onToggle={() => setIsHistoryOpen(!isHistoryOpen)}
+          isOpen={historyOpen}
+          onToggle={() => setHistoryOpen(!historyOpen)}
           history={history}
-          activeBriefId={activeBrief?.brief_id || null}
-          onSelectBrief={handleSelectBriefFromHistory}
-          onClearHistory={handleClearHistory}
+          activeBriefId={activeBrief?.brief_id ?? null}
+          onSelectBrief={(brief) => {
+            setActiveBrief(brief);
+            setSelectedId(brief.sector_id);
+            setSearchQuery(`Assess ${brief.sector_id} sector status`);
+            setAgentStates(INITIAL_AGENT_STATES);
+            setWhatIfResult(null);
+          }}
+          onClearHistory={() => {
+            setHistory([]);
+            localStorage.removeItem('aegis_history');
+          }}
         />
 
-        {/* Map Column */}
+        {/* ── Map ── */}
         <MaplibreMap
           sectors={sectors}
-          selectedSectorId={selectedSectorId}
+          selectedSectorId={selectedId}
           onSelectSector={handleSelectSector}
         />
 
-        {/* Copilot Sidebar Panel */}
-        <div className="console-panel" id="copilot-console-panel">
-          
-          {/* Ask Copilot Form */}
-          <section className="console-section">
-            <div className="console-section-title">
-              <Terminal size={14} color="var(--accent-cyan)" />
-              <span>DECISION QUERY CONSOLE</span>
+        {/* ── Copilot Console Panel ── */}
+        <div className="console-panel" ref={consoleRef} id="copilot-console-panel">
+
+          {/* ── Query Section ── */}
+          <div className="console-section">
+            <div className="console-section-header">
+              <div className="console-section-title">
+                <Terminal size={12} className="icon-accent" />
+                Decision Query Console
+              </div>
+              <span className={`console-badge ${sessionMode === 'live' ? 'live' : 'sim'}`}>
+                {sessionMode === 'live' ? 'LIVE' : 'EMULATED'}
+              </span>
             </div>
-            
+
             <form onSubmit={handleFormSubmit} className="query-form">
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Ask Aegis (e.g. 'Outage risk in Jurong', 'Marina Bay anomalies')"
+                placeholder="Ask AEGIS… e.g. 'Outage risk in Jurong'"
                 className="cyber-input"
-                disabled={isBriefLoading}
+                disabled={briefLoading}
                 id="query-input-field"
+                autoComplete="off"
               />
               <button
                 type="submit"
                 className="cyber-button"
-                disabled={isBriefLoading || !searchQuery.trim()}
+                disabled={briefLoading || !searchQuery.trim()}
                 id="btn-submit-query"
               >
-                <Play size={14} />
-                <span>RUN</span>
+                {briefLoading
+                  ? <span className="spinner" />
+                  : <Play size={13} />
+                }
+                <span>{briefLoading ? 'Running' : 'RUN'}</span>
               </button>
             </form>
-            
-            {/* Quick Prompts */}
-            <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedSectorId('MARINA_BAY');
-                  runOperationalQuery('Assess Marina Bay anomalous feedback and power surges', 'MARINA_BAY');
-                }}
-                className="cyber-input"
-                style={{ fontSize: '11px', padding: '4px 8px', width: 'auto', background: 'rgba(255,255,255,0.02)', cursor: 'pointer', borderStyle: 'dashed' }}
-                disabled={isBriefLoading}
-              >
-                Demo: Marina Bay Critical Outage
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedSectorId('CHANGI');
-                  runOperationalQuery('Evaluate weather impact on Changi Logistics corridors', 'CHANGI');
-                }}
-                className="cyber-input"
-                style={{ fontSize: '11px', padding: '4px 8px', width: 'auto', background: 'rgba(255,255,255,0.02)', cursor: 'pointer', borderStyle: 'dashed' }}
-                disabled={isBriefLoading}
-              >
-                Demo: Changi Storm Forecast
-              </button>
-            </div>
-          </section>
 
-          {/* Real-time Agent Pipeline Graph */}
-          <section className="console-section" style={{ background: 'rgba(0,0,0,0.1)' }}>
-            <div className="console-section-title" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Database size={14} color="var(--accent-cyan)" />
-                <span>ADK 2.0 MULTI-AGENT EXECUTION GRAPH</span>
-              </div>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                {sessionMode === 'live' ? 'STREAM: WS/EVENTS' : 'MODE: EMULATED'}
-              </div>
+            {/* Quick demo chips */}
+            <div className="prompt-chips">
+              {DEMO_PROMPTS.map((p) => (
+                <button
+                  key={p.sector}
+                  className="prompt-chip"
+                  disabled={briefLoading}
+                  onClick={() => runQuery(p.query, p.sector)}
+                  id={`demo-chip-${p.sector}`}
+                >
+                  {p.label}
+                </button>
+              ))}
             </div>
-            
+          </div>
+
+          {/* ── Agent Graph Section ── */}
+          <div className="console-section">
+            <div className="console-section-header">
+              <div className="console-section-title">
+                <Zap size={12} className="icon-accent" />
+                ADK 2.0 Multi-Agent Graph
+              </div>
+              <span style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
+                {sessionMode === 'live' ? 'WS · STREAMING' : 'EMULATED'}
+              </span>
+            </div>
             <AgentFlowGraph agentStates={agentStates} />
-          </section>
+          </div>
 
-          {/* Situation Report Card */}
-          <section className="console-section" style={{ flex: 1 }}>
-            <div className="console-section-title">
-              <ShieldCheck size={14} color="var(--accent-cyan)" />
-              <span>SITUATION ROOM REPORT</span>
+          {/* ── Situation Brief Section ── */}
+          <div className="console-section" style={{ flex: 1 }}>
+            <div className="console-section-header">
+              <div className="console-section-title">
+                <ShieldCheck size={12} className="icon-accent" />
+                Situation Room Brief
+              </div>
+              {activeBrief && (
+                <span style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                  {activeBrief.brief_id}
+                </span>
+              )}
             </div>
 
             <SituationBriefCard
               brief={activeBrief}
               sectorName={activeBrief ? sectors.find(s => s.sector_id === activeBrief.sector_id)?.name : undefined}
-              isLoading={isBriefLoading}
-              onWhatIfSubmit={handleWhatIfSubmit}
+              isLoading={briefLoading}
+              onWhatIfSubmit={handleWhatIf}
               whatIfResult={whatIfResult}
-              isWhatIfLoading={isWhatIfLoading}
+              isWhatIfLoading={whatIfLoading}
               onResetWhatIf={() => setWhatIfResult(null)}
             />
-          </section>
-        </div>
+          </div>
+
+        </div>{/* /console-panel */}
       </main>
     </>
   );

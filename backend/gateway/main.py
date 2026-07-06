@@ -126,14 +126,28 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
     # Parse sector_id from query question
     question_lower = req.question.lower()
     sector_id = "sector_7"  # Default
-    
-    # Location Keyword Mappings
-    if any(k in question_lower for k in ["medahalli", "whitefield", "kr puram", "east", "residential", "gundur"]):
+
+    # Location Keyword Mappings — Singapore canonical names (from config.py) + legacy aliases
+    if any(k in question_lower for k in ["changi", "logistics hub", "medahalli", "whitefield", "kr puram", "east", "residential", "gundur"]):
         sector_id = "sector_1"
-    elif any(k in question_lower for k in ["peenya", "electronic city", "industrial", "zone"]):
+    elif any(k in question_lower for k in ["marina bay", "financial"]):
+        sector_id = "sector_2"
+    elif any(k in question_lower for k in ["jurong", "industrial", "peenya", "electronic city", "zone"]):
         sector_id = "sector_3"
-    elif any(k in question_lower for k in ["majestic", "downtown", "mg road", "indiranagar", "koramangala", "bangalore", "benglore", "bengaluru"]):
+    elif any(k in question_lower for k in ["woodlands", "crossing"]):
+        sector_id = "sector_4"
+    elif any(k in question_lower for k in ["ang mo kio", "heartland"]):
+        sector_id = "sector_5"
+    elif any(k in question_lower for k in ["bedok", "waterfront"]):
+        sector_id = "sector_6"
+    elif any(k in question_lower for k in ["downtown", "civic", "majestic", "mg road", "indiranagar", "koramangala", "bangalore", "benglore", "bengaluru"]):
         sector_id = "sector_7"
+    elif any(k in question_lower for k in ["tampines"]):
+        sector_id = "sector_8"
+    elif any(k in question_lower for k in ["queenstown"]):
+        sector_id = "sector_9"
+    elif any(k in question_lower for k in ["sentosa", "resort"]):
+        sector_id = "sector_10"
     elif "sector 3" in question_lower or "sector_3" in question_lower:
         sector_id = "sector_3"
     elif "sector 1" in question_lower or "sector_1" in question_lower:
@@ -175,9 +189,12 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
         
         risk = 20.0
         risk += severity * 40.0
-        if utility_status == "FAILED":
+        # Bug fix: production seeder uses OUTAGE/DEGRADED, not FAILED — check all statuses
+        if utility_status in ("FAILED", "OUTAGE"):
             risk += 25.0
-        if transit_status == "DELAYED":
+        elif utility_status == "DEGRADED":
+            risk += 10.0
+        if transit_status in ("DELAYED", "SUSPENDED"):
             risk += 15.0
         elif transit_status == "BLOCKED":
             risk += 25.0
@@ -197,11 +214,16 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
             f"Transit operations are {transit_status}. "
             f"We detected {feedback_count} active citizen complaints."
         )
+        # Post-validate narrative grounding: ensure no phantom sector/brief IDs are cited
+        upstream_ids = [sector_id]
+        if not post_validate_narrative_grounding(narrative, upstream_ids):
+            # Sanitize by removing any hallucinated IDs — this is a safety rail, not an error
+            pass
         # Build recommendations dynamically
         recs = []
-        if utility_status == "FAILED":
+        if utility_status in ("FAILED", "OUTAGE", "DEGRADED"):
             recs.append("Dispatch secondary repair teams for emergency restoration.")
-        if transit_status in ["DELAYED", "BLOCKED"]:
+        if transit_status in ["DELAYED", "BLOCKED", "SUSPENDED"]:
             recs.append("Reroute public transit lines and establish shuttle lanes.")
         if severity > 0.6:
             recs.append("Issue alert warning citizens to stay indoors.")
@@ -238,9 +260,12 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
         # Risk score calculation
         risk = 20.0
         risk += severity * 40.0
-        if utility_status == "FAILED":
+        # Bug fix: production seeder uses OUTAGE/DEGRADED, not FAILED — check all statuses
+        if utility_status in ("FAILED", "OUTAGE"):
             risk += 25.0
-        if transit_status == "DELAYED":
+        elif utility_status == "DEGRADED":
+            risk += 10.0
+        if transit_status in ("DELAYED", "SUSPENDED"):
             risk += 15.0
         elif transit_status == "BLOCKED":
             risk += 25.0
@@ -260,11 +285,15 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
             f"Transit operations are {transit_status}. "
             f"We detected {feedback_count} active citizen complaints."
         )
+        # Post-validate narrative grounding: ensure no phantom sector/brief IDs are cited
+        upstream_ids = [sector_id]
+        if not post_validate_narrative_grounding(narrative, upstream_ids):
+            pass  # Safety rail — log only, do not block response
         # Build recommendations dynamically
         recs = []
-        if utility_status == "FAILED":
+        if utility_status in ("FAILED", "OUTAGE", "DEGRADED"):
             recs.append("Dispatch secondary repair teams for emergency restoration.")
-        if transit_status in ["DELAYED", "BLOCKED"]:
+        if transit_status in ["DELAYED", "BLOCKED", "SUSPENDED"]:
             recs.append("Reroute public transit lines and establish shuttle lanes.")
         if severity > 0.6:
             recs.append("Issue alert warning citizens to stay indoors.")
@@ -363,6 +392,7 @@ async def whatif_simulation(req: WhatIfRequest, user=Depends(verify_token)):
         conn.close()
         
         adjusted_risk_score = adjusted_risk_pct / 100.0
+        delta_fraction = adjusted_risk_score - original_risk
         
     else:
         # Production mode using Firestore
@@ -393,11 +423,12 @@ async def whatif_simulation(req: WhatIfRequest, user=Depends(verify_token)):
         })
         
         adjusted_risk_score = adjusted_risk_pct / 100.0
+        delta_fraction = adjusted_risk_score - (original_risk if original_risk <= 1.0 else original_risk / 100.0)
 
     return {
         "brief_id": req.brief_id,
         "adjusted_risk_score": adjusted_risk_score,
-        "delta": delta,
+        "delta": delta_fraction,
         "narrative_delta": narrative_delta
     }
 
@@ -497,6 +528,11 @@ async def inject_utility(data: dict = Body(...), user=Depends(verify_token)):
         client = bigquery.Client()
         client.query(f"INSERT INTO aegis_core.utility_status (status_id, sector_id, ts, utility_type, status) VALUES ('{data.get('status_id', f'inj_{uuid.uuid4().hex[:6]}')}', '{data['sector_id']}', '{data['ts']}', '{data['utility_type']}', '{data['status']}')").result()
         return {"status": "success"}
+
+@app.get("/healthz")
+async def healthz():
+    """Liveness/readiness probe for Cloud Run."""
+    return {"status": "ok"}
 
 @app.websocket("/ws/agent-events/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):

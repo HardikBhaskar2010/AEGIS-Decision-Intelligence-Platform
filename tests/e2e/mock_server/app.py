@@ -175,7 +175,7 @@ def verify_token(authorization: Optional[str] = Header(None)):
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authorization scheme")
     token = authorization.split(" ")[1]
-    if token.startswith("mock-") or token == "test-token-key":
+    if token.startswith("mock-") or token.startswith("mock_") or token == "test-token-key":
         return {"uid": "mock-user", "email": "mock@aegis.gov"}
     raise HTTPException(status_code=401, detail="Invalid token")
 
@@ -267,9 +267,12 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
 
     risk = 20.0  # Base
     risk += severity * 40.0
-    if utility_status == "FAILED":
+    # Fix: check all utility failure states, not just FAILED (matches production seeder)
+    if utility_status in ("FAILED", "OUTAGE"):
         risk += 25.0
-    if transit_status == "DELAYED":
+    elif utility_status == "DEGRADED":
+        risk += 10.0
+    if transit_status in ("DELAYED", "SUSPENDED"):
         risk += 15.0
     elif transit_status == "BLOCKED":
         risk += 25.0
@@ -283,9 +286,9 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
 
     # Build recommendations and narrative
     recs = []
-    if utility_status == "FAILED":
+    if utility_status in ("FAILED", "OUTAGE", "DEGRADED"):
         recs.append("Dispatch secondary repair teams for emergency restoration.")
-    if transit_status in ["DELAYED", "BLOCKED"]:
+    if transit_status in ["DELAYED", "BLOCKED", "SUSPENDED"]:
         recs.append("Reroute public transit lines and establish shuttle lanes.")
     if severity > 0.6:
         recs.append("Issue alert warning citizens to stay indoors.")
@@ -304,6 +307,9 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
     brief_id = f"brief_{uuid.uuid4().hex[:8]}"
     generated_at = datetime.utcnow().isoformat()
 
+    # Normalize risk score to [0.0, 1.0] fraction for storage and API responses
+    risk_fraction = risk / 100.0
+
     # Save brief to DB
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -313,7 +319,7 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
         (brief_id, sector_id, ts, risk_score, confidence, recommendation, narrative, session_id) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (brief_id, sector_id, generated_at, risk, confidence, recommendation, narrative, req.session_id)
+        (brief_id, sector_id, generated_at, risk_fraction, confidence, recommendation, narrative, req.session_id)
     )
     conn.commit()
     conn.close()
@@ -324,7 +330,7 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
     return {
         "brief_id": brief_id,
         "sector_id": sector_id,
-        "risk_score": risk,
+        "risk_score": risk_fraction,
         "confidence": confidence,
         "recommendation": recommendation,
         "narrative": narrative,
@@ -346,37 +352,39 @@ async def whatif_simulation(req: WhatIfRequest, user=Depends(verify_token)):
         conn.close()
         raise HTTPException(status_code=404, detail="Brief not found")
 
-    original_risk = brief["risk_score"]
-    
+    original_risk = brief["risk_score"]  # Already stored as fraction [0.0, 1.0]
+    original_risk_pct = original_risk * 100.0
+
     # Calculate adjusted risk score
     # Rainfall intensity adjustment affects risk score: +1% rainfall intensity adds 0.4% risk score
     adjustment_val = req.adjustment.rainfall_intensity_pct
-    adjusted_risk = original_risk + (adjustment_val * 0.4)
-    adjusted_risk = min(100.0, max(0.0, adjusted_risk))
-    
-    delta = adjusted_risk - original_risk
-    
+    adjusted_risk_pct = original_risk_pct + (adjustment_val * 0.4)
+    adjusted_risk_pct = min(100.0, max(0.0, adjusted_risk_pct))
+    adjusted_risk_fraction = adjusted_risk_pct / 100.0
+
+    delta = adjusted_risk_fraction - original_risk
+
     narrative_delta = (
         f"Simulating a {adjustment_val}% change in rainfall intensity. "
-        f"This alters the sector risk rating by {delta:+.2f}%, shifting it from "
-        f"{original_risk}% to {adjusted_risk}%."
+        f"This alters the sector risk rating by {delta * 100:+.2f}%, shifting it from "
+        f"{original_risk_pct:.2f}% to {adjusted_risk_pct:.2f}%."
     )
 
-    # Update brief with adjustment
+    # Update brief with adjustment (store as fraction)
     cursor.execute(
         """
         UPDATE SITUATION_BRIEFS 
         SET risk_score = ?, narrative = ?, rainfall_intensity_pct = ? 
         WHERE brief_id = ?
         """,
-        (adjusted_risk, brief["narrative"] + f" [What-If Adjusted: {narrative_delta}]", adjustment_val, req.brief_id)
+        (adjusted_risk_fraction, brief["narrative"] + f" [What-If Adjusted: {narrative_delta}]", adjustment_val, req.brief_id)
     )
     conn.commit()
     conn.close()
 
     return {
         "brief_id": req.brief_id,
-        "adjusted_risk_score": adjusted_risk,
+        "adjusted_risk_score": adjusted_risk_fraction,
         "delta": delta,
         "narrative_delta": narrative_delta
     }
@@ -419,6 +427,11 @@ async def reset_database(user=Depends(verify_token)):
     """Reset endpoint for E2E tests to enforce a clean database seed state."""
     init_db()
     return {"status": "success", "message": "Database reset and seeded."}
+
+@app.get("/healthz")
+async def healthz():
+    """Liveness/readiness probe for Cloud Run."""
+    return {"status": "ok"}
 
 @app.post("/api/v1/test/inject/weather")
 async def inject_weather(data: dict = Body(...), user=Depends(verify_token)):
