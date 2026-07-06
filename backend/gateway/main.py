@@ -324,6 +324,8 @@ async def query_engine(req: QueryRequest, user=Depends(verify_token)):
         "generated_at": generated_at
     }
 
+
+
 @app.post("/api/v1/whatif")
 async def whatif_simulation(req: WhatIfRequest, user=Depends(verify_token)):
     if not IS_PRODUCTION:
@@ -337,15 +339,16 @@ async def whatif_simulation(req: WhatIfRequest, user=Depends(verify_token)):
             raise HTTPException(status_code=404, detail="Brief not found")
             
         original_risk = brief["risk_score"]
+        original_risk_pct = original_risk * 100.0
         adjustment_val = req.adjustment.rainfall_intensity_pct
-        adjusted_risk = original_risk + (adjustment_val * 0.4)
-        adjusted_risk = min(100.0, max(0.0, adjusted_risk))
+        adjusted_risk_pct = original_risk_pct + (adjustment_val * 0.4)
+        adjusted_risk_pct = min(100.0, max(0.0, adjusted_risk_pct))
         
-        delta = adjusted_risk - original_risk
+        delta = adjusted_risk_pct - original_risk_pct
         narrative_delta = (
             f"Simulating a {adjustment_val}% change in rainfall intensity. "
             f"This alters the sector risk rating by {delta:+.2f}%, shifting it from "
-            f"{original_risk}% to {adjusted_risk}%."
+            f"{original_risk_pct:.2f}% to {adjusted_risk_pct:.2f}%."
         )
         
         cursor.execute(
@@ -354,10 +357,12 @@ async def whatif_simulation(req: WhatIfRequest, user=Depends(verify_token)):
             SET risk_score = ?, narrative = ?, rainfall_intensity_pct = ? 
             WHERE brief_id = ?
             """,
-            (adjusted_risk, brief["narrative"] + f" [What-If Adjusted: {narrative_delta}]", adjustment_val, req.brief_id)
+            (adjusted_risk_pct / 100.0, brief["narrative"] + f" [What-If Adjusted: {narrative_delta}]", adjustment_val, req.brief_id)
         )
         conn.commit()
         conn.close()
+        
+        adjusted_risk_score = adjusted_risk_pct / 100.0
         
     else:
         # Production mode using Firestore
@@ -369,26 +374,29 @@ async def whatif_simulation(req: WhatIfRequest, user=Depends(verify_token)):
             
         brief = doc.to_dict()
         original_risk = brief["risk_score"]
+        original_risk_pct = original_risk * 100.0
         adjustment_val = req.adjustment.rainfall_intensity_pct
-        adjusted_risk = original_risk + (adjustment_val * 0.4)
-        adjusted_risk = min(100.0, max(0.0, adjusted_risk))
+        adjusted_risk_pct = original_risk_pct + (adjustment_val * 0.4)
+        adjusted_risk_pct = min(100.0, max(0.0, adjusted_risk_pct))
         
-        delta = adjusted_risk - original_risk
+        delta = adjusted_risk_pct - original_risk_pct
         narrative_delta = (
             f"Simulating a {adjustment_val}% change in rainfall intensity. "
             f"This alters the sector risk rating by {delta:+.2f}%, shifting it from "
-            f"{original_risk}% to {adjusted_risk}%."
+            f"{original_risk_pct:.2f}% to {adjusted_risk_pct:.2f}%."
         )
         
         doc_ref.update({
-            "risk_score": adjusted_risk / 100.0,
+            "risk_score": adjusted_risk_pct / 100.0,
             "narrative": brief["narrative"] + f" [What-If Adjusted: {narrative_delta}]",
             "rainfall_intensity_pct": adjustment_val
         })
+        
+        adjusted_risk_score = adjusted_risk_pct / 100.0
 
     return {
         "brief_id": req.brief_id,
-        "adjusted_risk_score": adjusted_risk / 100.0,
+        "adjusted_risk_score": adjusted_risk_score,
         "delta": delta,
         "narrative_delta": narrative_delta
     }
@@ -413,7 +421,7 @@ async def get_sector_brief(sector_id: str, user=Depends(verify_token)):
     if not IS_PRODUCTION:
         conn = get_sqlite_conn()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM SITUATION_BRIEFS WHERE sector_id = ? ORDER BY ts DESC LIMIT 1", (sector_id,))
+        cursor.execute("SELECT * FROM SITUATION_BRIEFS WHERE sector_id = ? ORDER BY ts DESC, rowid DESC LIMIT 1", (sector_id,))
         row = cursor.fetchone()
         conn.close()
         if not row:
@@ -434,7 +442,7 @@ async def get_session_history(session_id: str, user=Depends(verify_token)):
     if not IS_PRODUCTION:
         conn = get_sqlite_conn()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM SITUATION_BRIEFS WHERE session_id = ? ORDER BY ts DESC", (session_id,))
+        cursor.execute("SELECT * FROM SITUATION_BRIEFS WHERE session_id = ? ORDER BY ts DESC, rowid DESC", (session_id,))
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]

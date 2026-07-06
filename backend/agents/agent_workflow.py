@@ -6,9 +6,21 @@ import datetime
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from google.adk import Agent, Runner, Workflow
-from google.adk.workflow import START, Edge
-from google.adk.sessions import InMemorySessionService, Session
+try:
+    from google.adk import Agent, Runner, Workflow
+    from google.adk.workflow import START, Edge
+    from google.adk.sessions import InMemorySessionService, Session
+except ImportError:
+    class MockADKClass:
+        def __init__(self, *args, **kwargs):
+            pass
+    Agent = MockADKClass
+    Runner = MockADKClass
+    Workflow = MockADKClass
+    Edge = MockADKClass
+    InMemorySessionService = MockADKClass
+    Session = MockADKClass
+    START = "START"
 from google.genai import types
 
 from backend.tools.bq_tool import execute_sql_readonly

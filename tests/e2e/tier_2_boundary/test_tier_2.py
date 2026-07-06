@@ -267,7 +267,7 @@ async def test_tier2_whatif_extreme_positive_adjustments(client, auth_headers):
     response = await client.post("/api/v1/whatif", json=whatif_payload, headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
-    assert data["adjusted_risk_score"] == 100.0
+    assert data["adjusted_risk_score"] == 1.0
 
 
 @pytest.mark.tier2

@@ -305,9 +305,9 @@ async def test_tier1_whatif_simulation_positive_delta(client, auth_headers):
     assert response.status_code == 200
     data = response.json()
     assert data["brief_id"] == brief_id
-    expected_risk = min(100.0, max(0.0, original_risk + (10.0 * 0.4)))
-    assert data["adjusted_risk_score"] == expected_risk
-    assert data["delta"] == expected_risk - original_risk
+    expected_risk = min(1.0, max(0.0, original_risk + (10.0 * 0.4 / 100.0)))
+    assert data["adjusted_risk_score"] == pytest.approx(expected_risk)
+    assert data["delta"] == pytest.approx((expected_risk - original_risk) * 100.0)
     assert "narrative_delta" in data
 
 @pytest.mark.tier1
@@ -332,9 +332,9 @@ async def test_tier1_whatif_simulation_negative_delta(client, auth_headers):
     assert response.status_code == 200
     data = response.json()
     assert data["brief_id"] == brief_id
-    expected_risk = min(100.0, max(0.0, original_risk + (-15.0 * 0.4)))
-    assert data["adjusted_risk_score"] == expected_risk
-    assert data["delta"] == expected_risk - original_risk
+    expected_risk = min(1.0, max(0.0, original_risk + (-15.0 * 0.4 / 100.0)))
+    assert data["adjusted_risk_score"] == pytest.approx(expected_risk)
+    assert data["delta"] == pytest.approx((expected_risk - original_risk) * 100.0)
 
 @pytest.mark.tier1
 async def test_tier1_whatif_simulation_zero_delta(client, auth_headers):
@@ -404,7 +404,7 @@ async def test_tier1_whatif_simulation_extreme_deltas(client, auth_headers):
     payload_pos = {"brief_id": brief_id, "adjustment": {"rainfall_intensity_pct": 300.0}}
     resp_pos = await client.post("/api/v1/whatif", json=payload_pos, headers=auth_headers)
     assert resp_pos.status_code == 200
-    assert resp_pos.json()["adjusted_risk_score"] == 100.0
+    assert resp_pos.json()["adjusted_risk_score"] == 1.0
 
     # Extreme negative delta (-300.0%)
     payload_neg = {"brief_id": brief_id, "adjustment": {"rainfall_intensity_pct": -300.0}}
