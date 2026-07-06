@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import {
   ReactFlow,
   Handle,

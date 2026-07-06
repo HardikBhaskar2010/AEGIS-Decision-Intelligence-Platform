@@ -4,7 +4,7 @@ import { AgentFlowGraph }      from './components/AgentFlowGraph';
 import { SituationBriefCard }  from './components/SituationBriefCard';
 import { HistoryConsole }       from './components/HistoryConsole';
 import type { Sector, SituationBrief, WhatIfResult, AgentEvent } from './components/types';
-import { Play, ShieldCheck, Database, Terminal, History, Zap } from 'lucide-react';
+import { Play, ShieldCheck, Terminal, History, Zap } from 'lucide-react';
 import Lenis from '@studio-freight/lenis';
 import gsap from 'gsap';
 
@@ -168,7 +168,7 @@ function App() {
     setAgentStates(INITIAL_AGENT_STATES);
     await sleep(200);
 
-    const steps: [string, string, string, number][] = [
+    const steps: [AgentEvent['type'], AgentEvent['agent'], string, number][] = [
       ['agent_start',  'Orchestrator', 'Routing task to specialist agents…',     800],
       ['agent_start',  'Query',        'Translating NL → BigQuery SQL…',         1000],
       ['tool_call',    'Query',        'BigQuery.query_read_only',                1200],
